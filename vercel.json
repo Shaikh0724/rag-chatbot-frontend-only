@@ -1,11 +1,11 @@
 {
   "version": 2,
   "public": true,
-  "cleanUrls": true,
+  "name": "rag-ai-frontend",
+  "installCommand": "echo 'no install needed'",
+  "buildCommand": "echo 'no build needed'",
+  "framework": null,
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
