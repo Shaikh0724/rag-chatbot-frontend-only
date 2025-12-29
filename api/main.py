@@ -31,6 +31,11 @@ app = FastAPI()
 
 # Frontend Connect: static folder ko serve karne ke liye
 #app.mount("/frontend", StaticFiles(directory="static"), name="static")
+origins = [
+    "http://localhost:5500",  # Local testing ke liye
+    "https://rag-ai-chatbot1-jwob.vercel.app", # Aapka Vercel link
+    "https://rag-ai-chatbot1.vercel.app",      # Agar aapka main domain hai
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +139,7 @@ async def chat(req: ChatReq):
         prompt = f"Context: {context}\n\nQuestion: {req.query}"
         if req.model_name == "gemini":
             res = gemini_model.generate_content(prompt)
-            answer = res.text
+            answer = res.texts
         elif req.model_name == "exai":
             from openai import OpenAI as XAIClient
             x_client = XAIClient(
