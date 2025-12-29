@@ -1,8 +1,7 @@
 {
   "version": 2,
-  "name": "rag-ai-frontend",
+  "public": true,
   "cleanUrls": true,
-  "framework": null,
   "rewrites": [
     {
       "source": "/(.*)",
