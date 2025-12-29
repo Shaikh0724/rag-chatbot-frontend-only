@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from bson import ObjectId
 from datetime import datetime
 from api.models import UserSignup, UserLogin, ChatReq
