@@ -1,0 +1,27 @@
+fastapi
+uvicorn
+pydantic
+aiofiles
+python-multipart
+PyPDF2
+requests
+# LangChain RAG Components
+langchain
+langchain-openai
+langchain-pinecone
+# LLM SDKs
+openai
+google-genai
+
+
+fastapi
+uvicorn
+python-dotenv
+openai
+google-genai
+langchain-qdrant
+qdrant-client
+pypdf2
+passlib[bcrypt]    # Password hashing ke liye
+python-jose[cryptography] # JWT Tokens (Login session) ke liye
+motor              # MongoDB ka async driver

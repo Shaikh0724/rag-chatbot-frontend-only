@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Multi-Model RAG Chatbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        * { font-family: 'Inter', sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .book-card { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); transform-origin:center; }
+        .book-card:hover { transform: translateY(-4px) scale(1.01); box-shadow: 0 15px 30px rgba(0,0,0,0.1); }
+        .result-card { animation: slideUp 0.6s ease-out; }
+        @keyframes slideUp { from { opacity:0; transform:translateY(20px);} to { opacity:1; transform:translateY(0);} }
+        .fade-in { animation: fadeIn 0.8s ease-out; }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
+    <header class="gradient-bg text-white py-8 relative overflow-hidden">
+        <div class="absolute inset-0 bg-black opacity-10"></div>
+        <div class="container mx-auto px-4 relative z-10">
+            <div class="flex flex-col md:flex-row items-center justify-between">
+                <div class="flex items-center mb-6 md:mb-0">
+                    <div class="w-16 h-16 bg-white rounded-full flex items-center justify-center mr-4 shadow-2xl">
+                        <i class="fas fa-brain text-3xl text-purple-600"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-3xl md:text-4xl font-bold">Multi-Model RAG Chatbot</h1>
+                        <p class="text-lg opacity-90">GPT, Gemini, & ex.ai powered analysis of your documents (Qdrant RAG).</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-12">
+        <section class="mb-16 fade-in">
+            <div class="bg-white rounded-3xl shadow-2xl p-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                    <i class="fas fa-database mr-3 text-purple-600"></i>
+                    Index Your Documents (Qdrant RAG)
+                </h2>
+                <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center hover:border-purple-400 transition-all duration-300 group">
+                    <div class="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-purple-100 to-blue-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                        <i class="fas fa-file-upload text-4xl text-purple-600"></i>
+                    </div>
+                    <p class="text-gray-600 mb-4 text-lg">Drag & drop PDF/TXT files or click to browse</p>
+                    <input type="file" id="bookUpload" class="hidden" accept=".pdf,.txt" multiple>
+                    <label for="bookUpload" class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-xl cursor-pointer hover:shadow-lg transition-all duration-300 inline-flex items-center">
+                        <i class="fas fa-plus mr-3"></i>Select Files
+                    </label>
+                    <p class="text-sm text-gray-500 mt-4">Supported formats: PDF, TXT. Files will be indexed into Qdrant.</p>
+                </div>
+                <div id="uploadProgress" class="mt-6 hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-medium text-gray-700">Indexing in progress...</span>
+                        <span class="text-sm text-gray-500" id="progressPercent">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-3">
+                        <div id="progressBarFill" class="bg-gradient-to-r from-purple-600 to-blue-600 h-3 rounded-full transition-all duration-300" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-16 fade-in" style="animation-delay: 0.2s">
+            <div class="bg-white rounded-3xl shadow-2xl p-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                    <i class="fas fa-search mr-3 text-green-600"></i>
+                    Intelligent Search & Model Selection
+                </h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    
+                    <div class="lg:col-span-2">
+                        <div class="relative mb-4">
+                            <input type="text" id="searchInput" placeholder="Ask anything about your indexed documents..." class="w-full px-6 py-4 pl-12 border-2 border-gray-200 rounded-2xl focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none transition-all text-lg">
+                            <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                            <button id="searchBtn" class="absolute right-2 top-2 bg-gradient-to-r from-green-600 to-teal-600 text-white px-6 py-2 rounded-xl hover:shadow-lg transition-all">
+                                <i class="fas fa-paper-plane mr-2"></i>Ask
+                            </button>
+                        </div>
+                        
+                        <div class="flex flex-wrap gap-3 mb-6">
+                            <span class="quick-tag bg-blue-100 text-blue-800 px-4 py-2 rounded-full text-sm cursor-pointer hover:bg-blue-200 transition-colors">What is the main finding?</span>
+                            <span class="quick-tag bg-purple-100 text-purple-800 px-4 py-2 rounded-full text-sm cursor-pointer hover:bg-purple-200 transition-colors">Summarize the third section</span>
+                            <span class="quick-tag bg-orange-100 text-orange-800 px-4 py-2 rounded-full text-sm cursor-pointer hover:bg-orange-200 transition-colors">What risks were mentioned?</span>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-1">
+                        <label for="modelSelect" class="block text-sm font-medium text-gray-700 mb-3">Select AI Model for Generation:</label>
+                        <select id="modelSelect" class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 outline-none transition-all text-base bg-white shadow-sm">
+                            <option value="gpt" selected>GPT (High Quality, Versatile)</option>
+                            <option value="gemini">Gemini (Fast, Cost-Effective)</option>
+                            <option value="exai">ex.ai (Specialized/Custom)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="fade-in" style="animation-delay: 0.4s">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                <i class="fas fa-star mr-3 text-yellow-600"></i>
+                AI-Powered Results
+            </h2>
+            
+            <div id="resultsContainer" class="space-y-6">
+                <div class="bg-gradient-to-r from-blue-50 to-purple-50 rounded-3xl p-8 text-center">
+                    <div class="w-20 h-20 mx-auto mb-6 bg-white rounded-full flex items-center justify-center shadow-lg">
+                        <i class="fas fa-robot text-3xl text-purple-600"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Welcome!</h3>
+                    <p class="text-gray-600">Upload your files above to index them. Then, ask a question and select the AI model to analyze the information!</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-gray-900 text-white py-12 mt-20">
+        <div class="container mx-auto px-4 text-center">
+            <p class="text-sm text-gray-500">Built with FastAPI, LangChain, Qdrant, and Vercel.</p>
+        </div>
+    </footer>
+
+    <script>
+    (function() {
+        const API_BASE = ""; // Deployed Vercel URL par yeh same origin rahega
+
+        // DOM elements
+        const uploadInput = document.getElementById('bookUpload');
+        const dropZone = document.getElementById('dropZone');
+        const uploadProgress = document.getElementById('uploadProgress');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const progressPercent = document.getElementById('progressPercent');
+
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const modelSelect = document.getElementById('modelSelect');
+        const quickTags = document.querySelectorAll('.quick-tag');
+        const resultsContainer = document.getElementById('resultsContainer');
+
+        // Helper: notification
+        function showNotification(message, type='info') {
+            const notification = document.createElement('div');
+            notification.className = `fixed top-4 right-4 px-6 py-3 rounded-xl shadow-lg transform transition-all duration-300 ${
+                type === 'success' ? 'bg-green-600 text-white' :
+                type === 'error' ? 'bg-red-600 text-white' :
+                'bg-blue-600 text-white'
+            }`;
+            notification.innerHTML = `<div class="flex items-center"><i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'} mr-3"></i><span>${message}</span></div>`;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 500);
+            }, 5000);
+        }
+
+        // Upload files with progress (sequential to ensure indexing)
+        function uploadFilesWithProgress(fileList) {
+            if (!fileList || fileList.length === 0) return;
+            uploadProgress.classList.remove('hidden');
+            
+            // Notification: Indexing started
+            showNotification(`Starting Indexing for ${fileList.length} file(s) into Qdrant...`, 'info');
+
+            (async () => {
+                for (let i = 0; i < fileList.length; i++) {
+                    const file = fileList[i];
+                    const lower = file.name.toLowerCase();
+                    if (!lower.endsWith('.pdf') && !lower.endsWith('.txt')) {
+                        showNotification(`Skipped ${file.name} (only PDF/TXT supported)`, 'error');
+                        continue;
+                    }
+
+                    await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        const form = new FormData();
+                        form.append('file', file);
+
+                        // CRITICAL: Call the /index endpoint
+                        xhr.open('POST', `${API_BASE}/index`); 
+                        
+                        // Show progress for each file
+                        let overallProgressInterval;
+
+                        xhr.onloadstart = function() {
+                            overallProgressInterval = setInterval(() => {
+                                // Simulate RAG processing after initial file upload
+                                const currentFileProgressBase = (i / fileList.length) * 100;
+                                let increment = Math.random() * 2;
+                                let nextPercent = parseFloat(progressPercent.textContent.replace('%', ''));
+                                
+                                if (nextPercent < currentFileProgressBase + 80 / fileList.length) {
+                                    nextPercent = Math.min(nextPercent + increment, currentFileProgressBase + 80 / fileList.length);
+                                    progressBarFill.style.width = nextPercent + '%';
+                                    progressPercent.textContent = Math.round(nextPercent) + '%';
+                                }
+                            }, 500);
+                        };
+                        
+                        xhr.onload = function() {
+                            clearInterval(overallProgressInterval);
+                            const finalPercent = ((i + 1) / fileList.length) * 100;
+                            progressBarFill.style.width = finalPercent + '%';
+                            progressPercent.textContent = Math.round(finalPercent) + '%';
+
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                try {
+                                    const json = JSON.parse(xhr.responseText || "{}");
+                                    showNotification(`Indexed: ${json.filename || file.name}. Chunks: ${json.chunks_count || 'N/A'}`, 'success');
+                                } catch (e) {
+                                    showNotification(`Indexed: ${file.name}`, 'success');
+                                }
+                                resolve();
+                            } else {
+                                const errorDetail = (JSON.parse(xhr.responseText) || {}).detail || "Unknown error.";
+                                showNotification(`Indexing failed: ${file.name}. Detail: ${errorDetail}`, 'error');
+                                reject(errorDetail);
+                            }
+                        };
+                        xhr.onerror = function() {
+                            clearInterval(overallProgressInterval);
+                            showNotification(`Network error during indexing: ${file.name}`, 'error');
+                            reject("Network error");
+                        };
+                        xhr.send(form);
+                    }).catch(err => {
+                        console.error("Indexing error:", err);
+                    });
+                }
+
+                // finalize UI
+                setTimeout(() => {
+                    uploadProgress.classList.add('hidden');
+                    progressBarFill.style.width = '0%';
+                    progressPercent.textContent = '0%';
+                }, 1000);
+            })();
+        }
+
+        // Perform search (call backend)
+        async function performSearch() {
+            const query = searchInput.value.trim();
+            const modelName = modelSelect.value;
+            
+            if (!query) {
+                showNotification('Please enter a search query', 'error');
+                return;
+            }
+            
+            // Show loading UI
+            resultsContainer.innerHTML = `
+                <div class="bg-white rounded-3xl p-8 text-center">
+                    <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-6"></div>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Analyzing with ${modelName.toUpperCase()}...</h3>
+                    <p class="text-gray-600">Retrieving context from Qdrant and generating answer.</p>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`${API_BASE}/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // CRITICAL: Send query and model_name
+                    body: JSON.stringify({ query, model_name: modelName, books: [] }) 
+                });
+                
+                const data = await res.json();
+                
+                if (res.status !== 200) {
+                    throw new Error(data.detail || "Search request failed.");
+                }
+
+                const answer = data.response || "No answer returned.";
+                const source = data.source_files || "N/A";
+                const modelUsed = data.model_used || modelName;
+                renderResult(answer, query, source, modelUsed);
+            } catch (err) {
+                console.error("Search error:", err);
+                showNotification('Search failed: ' + err.message, 'error');
+                resultsContainer.innerHTML = `
+                    <div class="bg-red-50 rounded-3xl p-8 text-center border border-red-200">
+                        <p class="text-red-600 mb-4 font-semibold">Error: ${err.message}</p>
+                        <p class="text-gray-600">Check API Keys, Qdrant URL, and indexing status.</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Render search result
+        function renderResult(text, query, source, modelUsed) {
+            resultsContainer.innerHTML = `
+                <div class="result-card bg-white rounded-3xl p-8 shadow-xl border border-gray-100">
+                    <div class="flex items-start justify-between mb-6">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800">Answer</h3>
+                            <p class="text-gray-600 text-sm mt-1">Query: "${escapeHtml(query)}"</p>
+                        </div>
+                        <div class="text-sm text-gray-500 text-right">
+                            <span class="block mb-1 font-semibold ${modelUsed === 'gpt' ? 'text-blue-600' : modelUsed === 'gemini' ? 'text-purple-600' : 'text-green-600'}">Model: ${modelUsed.toUpperCase()}</span>
+                            Source Files: ${escapeHtml(source)}
+                        </div>
+                    </div>
+                    <p class="text-gray-700 leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</p>
+                </div>
+            `;
+        }
+
+        // Utility to escape HTML in strings (prevent XSS)
+        function escapeHtml(str) {
+            if (!str && str !== 0) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Init events
+        function initEvents() {
+            // file input change
+            uploadInput.addEventListener('change', (e) => {
+                const files = e.target.files;
+                if (files && files.length) uploadFilesWithProgress(files);
+                uploadInput.value = "";
+            });
+            // drag & drop
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-purple-600', 'bg-purple-50');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-purple-600', 'bg-purple-50');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-purple-600', 'bg-purple-50');
+                const files = e.dataTransfer.files;
+                if (files && files.length) uploadFilesWithProgress(files);
+            });
+            // search
+            searchBtn.addEventListener('click', performSearch);
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+            // quick tags
+            quickTags.forEach(tag => {
+                tag.addEventListener('click', () => {
+                    searchInput.value = tag.textContent.trim();
+                    performSearch();
+                });
+            });
+        }
+
+        // Start
+        document.addEventListener('DOMContentLoaded', initEvents);
+    })();
+    </script>
+</body>
+</html>
