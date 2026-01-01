@@ -1,4 +1,4 @@
-# api/main.py - COMPLETE FIXED CODE WITH QDRANT FIX
+# api/main.py - COMPLETE FIXED CODE WITH QDRANT PAYLOAD INDEXING
 import os
 import uuid
 from datetime import datetime
@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, PayloadSchemaType
 from openai import OpenAI
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -41,10 +41,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- CLIENTS INIT ---
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
-
-# ✅ FIX: Properly initialize Qdrant client
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-
 mongo_client = AsyncIOMotorClient(MONGODB_URL)
 db = mongo_client.rag_db
 
@@ -100,58 +97,44 @@ async def index_document(file: UploadFile = File(...), email: Optional[str] = No
         if filename.endswith(".pdf"):
             pdf_reader = pypdf.PdfReader(io.BytesIO(content))
             for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        
+                text += (page.extract_text() or "") + "\n"
         elif filename.endswith(".docx"):
-            try:
-                doc = docx.Document(io.BytesIO(content))
-                for para in doc.paragraphs:
-                    text += para.text + "\n"
-            except Exception as e:
-                return {"message": "Error reading Word file. Make sure it is not password protected."}
-        
+            doc = docx.Document(io.BytesIO(content))
+            for para in doc.paragraphs:
+                text += para.text + "\n"
         elif filename.endswith(".txt"):
             text = content.decode("utf-8")
-            
         else:
-            return {"message": "Unsupported file format. Please upload PDF, DOCX, or TXT."}
-
+            return {"message": "Unsupported file format."}
     except Exception as e:
-        print(f"Error reading file: {e}")
         return {"message": f"Error reading file: {str(e)}"}
     
     if not text.strip():
-        return {"message": "File is empty or could not extract text."}
+        return {"message": "File is empty."}
 
-    # Text Chunks
-    chunk_size = 1000
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-    
+    chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
     points = []
-    for i, chunk in enumerate(chunks):
-        response = client_openai.embeddings.create(
-            input=chunk,
-            model="text-embedding-3-small"
-        )
-        vector = response.data[0].embedding
-        
-        payload = {"text": chunk, "filename": file.filename}
-        if email:
-            payload["user_email"] = email
 
-        points.append(PointStruct(
-            id=str(uuid.uuid4()),
-            vector=vector,
-            payload=payload
-        ))
+    for chunk in chunks:
+        emb_res = client_openai.embeddings.create(input=chunk, model="text-embedding-3-small")
+        vector = emb_res.data[0].embedding
+        payload = {"text": chunk, "filename": file.filename, "user_email": email}
+
+        points.append(PointStruct(id=str(uuid.uuid4()), vector=vector, payload=payload))
     
-    # ✅ Create collection if doesn't exist
+    # ✅ Create collection AND Index for user_email
     try:
         qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
     except:
         qdrant_client.create_collection(
             collection_name=QDRANT_COLLECTION_NAME,
             vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+        )
+        # Fix for "Index required" error:
+        qdrant_client.create_payload_index(
+            collection_name=QDRANT_COLLECTION_NAME,
+            field_name="user_email",
+            field_schema=PayloadSchemaType.KEYWORD,
         )
         
     qdrant_client.upsert(collection_name=QDRANT_COLLECTION_NAME, points=points)
@@ -160,32 +143,17 @@ async def index_document(file: UploadFile = File(...), email: Optional[str] = No
 @app.post("/search")
 async def search(request: QueryRequest):
     try:
-        print(f"DEBUG: Received search request: {request}")
-
-        # Handle empty string session_id
-        if request.session_id == "":
-            request.session_id = None
+        if request.session_id == "": request.session_id = None
 
         # 1. Embed Query
-        query_vector_response = client_openai.embeddings.create(
-            input=request.query,
-            model="text-embedding-3-small"
-        )
-        query_vector = query_vector_response.data[0].embedding
+        query_vector_res = client_openai.embeddings.create(input=request.query, model="text-embedding-3-small")
+        query_vector = query_vector_res.data[0].embedding
 
-        # 2. Search in Qdrant - ✅ FIXED METHOD
+        # 2. Search with Filter
         search_filter = None
         if request.user_email:
-            search_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="user_email",
-                        match=MatchValue(value=request.user_email)
-                    )
-                ]
-            )
+            search_filter = Filter(must=[FieldCondition(key="user_email", match=MatchValue(value=request.user_email))])
 
-        # ✅ FIX: Use correct search method
         search_result = qdrant_client.search(
             collection_name=QDRANT_COLLECTION_NAME,
             query_vector=query_vector,
@@ -193,69 +161,36 @@ async def search(request: QueryRequest):
             limit=3
         )
 
-        print(f"DEBUG: Found {len(search_result)} results")
-
-        # 3. Build Context
-        context = ""
-        for hit in search_result:
-            context += hit.payload.get("text", "") + "\n\n"
+        context = "\n\n".join([hit.payload.get("text", "") for hit in search_result])
 
         if not context:
-            return {
-                "response": "I couldn't find relevant information in your uploaded documents. Please make sure you've uploaded documents and try asking a different question.",
-                "session_id": request.session_id
-            }
+            return {"response": "No relevant info found.", "session_id": request.session_id}
 
-        # 4. Generate Answer
-        system_prompt = f"You are a helpful AI assistant. Answer the user's question based on the following context from their documents. If the context doesn't contain relevant information, say so politely.\n\nContext:\n{context}"
-        answer = "Error generating response."
+        # 3. LLM Generation
+        system_prompt = f"Answer based on context:\n\n{context}"
+        answer = ""
 
-        if request.model_name == "exai":
-            try:
-                completion = client_xai.chat.completions.create(
-                    model="grok-beta",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": request.query}
-                    ]
-                )
-                answer = completion.choices[0].message.content
-            except Exception as e:
-                print(f"Grok Error: {str(e)}")
-                answer = f"Grok API Error: {str(e)}"
+        if request.model_name == "gemini":
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(f"{system_prompt}\n\nQuestion: {request.query}")
+            answer = response.text
+        elif request.model_name == "exai":
+            completion = client_xai.chat.completions.create(
+                model="grok-beta",
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": request.query}]
+            )
+            answer = completion.choices[0].message.content
+        else:
+            completion = client_openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": request.query}]
+            )
+            answer = completion.choices[0].message.content
 
-        elif request.model_name == "gemini":
-            try:
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(f"{system_prompt}\n\nUser Question: {request.query}")
-                answer = response.text
-            except Exception as e:
-                print(f"Gemini Error: {str(e)}")
-                answer = f"Gemini API Error: {str(e)}"
-
-        else:  # Default GPT
-            try:
-                completion = client_openai.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": request.query}
-                    ]
-                )
-                answer = completion.choices[0].message.content
-            except Exception as e:
-                print(f"OpenAI Error: {str(e)}")
-                answer = f"OpenAI API Error: {str(e)}"
-
-        # 5. Save History
+        # 4. Save History
         if request.user_email:
             if not request.session_id:
-                new_session = {
-                    "user_email": request.user_email,
-                    "title": request.query[:30],
-                    "created_at": datetime.now(),
-                    "messages": []
-                }
+                new_session = {"user_email": request.user_email, "title": request.query[:30], "created_at": datetime.now(), "messages": []}
                 res = await db.sessions.insert_one(new_session)
                 request.session_id = str(res.inserted_id)
 
@@ -267,40 +202,21 @@ async def search(request: QueryRequest):
         return {"response": answer, "session_id": request.session_id}
 
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "response": f"I encountered an error while processing your request. Please try again or contact support. Error: {str(e)}", 
-            "session_id": request.session_id
-        }
+        return {"response": f"Error: {str(e)}", "session_id": request.session_id}
 
 @app.get("/history/{email}")
 async def get_history(email: str):
     sessions = await db.sessions.find({"user_email": email}).sort("created_at", -1).to_list(100)
-    for s in sessions:
-        s["_id"] = str(s["_id"])
+    for s in sessions: s["_id"] = str(s["_id"])
     return sessions
 
 @app.get("/reset_qdrant")
 def reset_qdrant():
     try:
         qdrant_client.delete_collection(QDRANT_COLLECTION_NAME)
-        return {"message": "Success! Purana data delete ho gaya. Ab naya upload karein."}
+        return {"message": "Success! Collection deleted."}
     except Exception as e:
         return {"message": f"Error: {str(e)}"}
-
-# ✅ BONUS: Health check endpoint for debugging
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "ok",
-        "qdrant_connected": bool(QDRANT_URL and QDRANT_API_KEY),
-        "mongodb_connected": bool(MONGODB_URL),
-        "openai_configured": bool(OPENAI_API_KEY),
-        "gemini_configured": bool(GEMINI_API_KEY),
-        "xai_configured": bool(XAI_API_KEY)
-    }
 '''
 import os
 import sys
