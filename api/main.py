@@ -1,4 +1,4 @@
-# api/main.py - COMPLETE CODE
+# api/main.py - COMPLETE FIXED CODE
 import os
 import uuid
 from datetime import datetime
@@ -13,6 +13,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 import pypdf
 import io
+# 👇 WORD FILE SUPPORT K LIYE
+import docx 
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,24 +36,18 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = "my_documents"
 MONGODB_URL = os.getenv("MONGODB_URL")
-XAI_API_KEY = os.getenv("XAI_API_KEY") # NOTE: Render pe spelling XAI_API_KEY honi chahiye
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- CLIENTS INIT ---
-# 1. OpenAI
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
-
-# 2. Qdrant
 client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-
-# 3. MongoDB
 mongo_client = AsyncIOMotorClient(MONGODB_URL)
 db = mongo_client.rag_db
 
-# 4. Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-# 5. Grok (xAI)
 client_xai = OpenAI(
     api_key=XAI_API_KEY,
     base_url="https://api.x.ai/v1",
@@ -62,10 +58,11 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+# 👇 YEH MODEL FRONTEND SE MATCH HONA CHAHIYE (422 ERROR FIX)
 class QueryRequest(BaseModel):
-    query: str
+    query: str              # Frontend must send 'query'
     model_name: str = "gpt"
-    user_email: str = None
+    user_email: str = None  # Frontend must send 'user_email'
     session_id: str = None
 
 # --- ROUTES ---
@@ -93,13 +90,41 @@ async def login(user: LoginRequest):
 
 @app.post("/index")
 async def index_document(file: UploadFile = File(...), email: str = None):
-    # PDF Read
     content = await file.read()
-    pdf_reader = pypdf.PdfReader(io.BytesIO(content))
+    filename = file.filename.lower()
     text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text() + "\n"
+
+    # --- 👇 FIXED: FILE TYPE CHECKING (500 ERROR FIX) ---
+    try:
+        if filename.endswith(".pdf"):
+            # Handle PDF
+            pdf_reader = pypdf.PdfReader(io.BytesIO(content))
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+        
+        elif filename.endswith(".docx"):
+            # Handle Word Document
+            try:
+                doc = docx.Document(io.BytesIO(content))
+                for para in doc.paragraphs:
+                    text += para.text + "\n"
+            except Exception as e:
+                return {"message": "Error reading Word file. Make sure it is not password protected."}
+        
+        elif filename.endswith(".txt"):
+            # Handle Text File
+            text = content.decode("utf-8")
+            
+        else:
+            return {"message": "Unsupported file format. Please upload PDF, DOCX, or TXT."}
+
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return {"message": f"Error reading file: {str(e)}"}
     
+    if not text.strip():
+        return {"message": "File is empty or could not extract text."}
+
     # Text Chunks
     chunk_size = 1000
     chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
@@ -113,7 +138,7 @@ async def index_document(file: UploadFile = File(...), email: str = None):
         )
         vector = response.data[0].embedding
         
-        # Metadata (Email zaroori hai filtering k liye)
+        # Metadata
         payload = {"text": chunk, "filename": file.filename}
         if email:
             payload["user_email"] = email
@@ -139,6 +164,8 @@ async def index_document(file: UploadFile = File(...), email: str = None):
 @app.post("/search")
 async def search(request: QueryRequest):
     try:
+        print(f"DEBUG: Received search request: {request}") # Log to see what frontend sends
+
         # 1. Embed Query
         query_vector_response = client_openai.embeddings.create(
             input=request.query,
@@ -146,7 +173,7 @@ async def search(request: QueryRequest):
         )
         query_vector = query_vector_response.data[0].embedding
 
-        # 2. Search in Qdrant (Filter by Email if provided)
+        # 2. Search in Qdrant
         search_filter = None
         if request.user_email:
             search_filter = models.Filter(
@@ -171,12 +198,10 @@ async def search(request: QueryRequest):
             context += hit.payload.get("text", "") + "\n\n"
 
         if not context:
-            # Fallback: Agar filter se nahi mila, toh bina filter try karein (optional)
             return {"response": "I couldn't find relevant info in your uploaded documents.", "session_id": request.session_id}
 
         # 4. Generate Answer
         system_prompt = f"Answer based on this context:\n\n{context}"
-        
         answer = "Error generating response."
 
         if request.model_name == "exai":
@@ -250,7 +275,6 @@ def reset_qdrant():
         return {"message": "Success! Purana data delete ho gaya. Ab naya upload karein."}
     except Exception as e:
         return {"message": f"Error: {str(e)}"}
-
 
 '''
 import os
