@@ -11,7 +11,7 @@ from openai import OpenAI
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
-import PyPDF2
+import pypdf
 import io
 from dotenv import load_dotenv
 
@@ -95,7 +95,7 @@ async def login(user: LoginRequest):
 async def index_document(file: UploadFile = File(...), email: str = None):
     # PDF Read
     content = await file.read()
-    pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+    pdf_reader = pypdf.PdfReader(io.BytesIO(content))
     text = ""
     for page in pdf_reader.pages:
         text += page.extract_text() + "\n"
